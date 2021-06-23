@@ -65,7 +65,7 @@
   (-regex-transformer [this transformer method options] "returns the raw internal regex transformer implementation")
   (-regex-min-max [this] "returns size of the sequence as [min max] vector. nil max means unbuond."))
 
-(extend-type #?(:clj Object, :cljs default)
+(extend-type #?(:clj Object, :cljr Object, :cljs default)
   RegexSchema
   (-regex-op? [_] false)
 
@@ -118,7 +118,7 @@
   ([type data] (-fail! type nil data))
   ([type message data] (throw (ex-info (str type " " (pr-str data) message) {:type type, :data data}))))
 
-(defn -safe-pred [f] #(try (f %) (catch #?(:clj Exception, :cljs js/Error) _ false)))
+(defn -safe-pred [f] #(try (f %) (catch #?(:clj Exception, :cljr Exception, :cljs js/Error) _ false)))
 
 (defn -keyword->string [x]
   (if (keyword? x)
@@ -158,8 +158,10 @@
 (defn -update [m k f] (assoc m k (f (get m k))))
 
 (defn -memoize [f]
-  (let [value #?(:clj (AtomicReference. nil), :cljs (atom nil))]
-    (fn [] #?(:clj (or (.get value) (do (.set value (f)) (.get value))), :cljs (or @value (reset! value (f)))))))
+  (let [value #?(:clj (AtomicReference. nil), :cljr (atom nil), :cljs (atom nil))]
+    (fn [] #?(:clj (or (.get value) (do (.set value (f)) (.get value)))
+              :cljr (or @value (reset! value (f)))
+              :cljs (or @value (reset! value (f)))))))
 
 (defn -inner-indexed [walker path children options]
   (mapv (fn [[i c]] (-inner walker c (conj path i) options)) (map-indexed vector children)))
@@ -306,14 +308,21 @@
                              is? (satisfies? IntoSchema this)]
                          (extend-protocol Schemas (class this)
                            (-schema? [_] s?)
+                           (-into-schema? [_] is?)))
+                  :cljr
+                  (let [s? (satisfies? Schema this)
+                             is? (satisfies? IntoSchema this)]
+                         (extend-protocol Schemas (class this)
+                           (-schema? [_] s?)
                            (-into-schema? [_] is?)))))]
   (extend-protocol Schemas
     nil
     (-schema? [_] false)
     (-into-schema? [_] false)
-    #?(:clj Object, :cljs default)
+    #?(:clj Object, :cljr Object, cljs default)
     (-schema? [this] #?(:clj (extend Schema this)) (satisfies? Schema this))
-    (-into-schema? [this] #?(:clj (extend IntoSchema this)) (satisfies? IntoSchema this))))
+    (-into-schema? [this] #?(:clj (extend IntoSchema this)
+                             :cljr (extend IntoSchema this)) (satisfies? IntoSchema this))))
 
 ;;
 ;; Schemas
@@ -670,6 +679,12 @@
                                                (if (.hasNext it)
                                                  (and ((.next it) m) (recur))
                                                  true))))
+                                   :cljr (let [it (.GetEnumerator ^System.Collections.IEnumerable validators)]
+                                           (boolean
+                                            (loop []
+                                              (if (.MoveNext it)
+                                                (and ((.Current it) m) (recur))
+                                                true))))
                                    :cljs (reduce #(or (%2 m) (reduced false)) true validators))))]
                (fn [m] (and (map? m) (validate m)))))
            (-explainer [this path]
@@ -1010,7 +1025,7 @@
                 (if-not (re-find re x)
                   (conj acc (miu/-error path in this x))
                   acc)
-                (catch #?(:clj Exception, :cljs js/Error) e
+                (catch #?(:clj Exception, :cljr Exception, :cljs js/Error) e
                   (conj acc (miu/-error path in this x (:type (ex-data e))))))))
           (-transformer [this transformer method options]
             (-intercepting (-value-transformer transformer this method options)))
@@ -1051,7 +1066,7 @@
                 (if-not (f x)
                   (conj acc (miu/-error path in this x))
                   acc)
-                (catch #?(:clj Exception, :cljs js/Error) e
+                (catch #?(:clj Exception, :cljr Exception, :cljs js/Error) e
                   (conj acc (miu/-error path in this x (:type (ex-data e))))))))
           (-parser [this]
             (let [validator (-validator this)]
@@ -1834,7 +1849,7 @@
        (reduce -register-var {})))
 
 (defn class-schemas []
-  {#?(:clj Pattern, :cljs js/RegExp) (-re-schema true)})
+  {#?(:clj Pattern, :cljr System.Text.RegularExpressions.Regex,:cljs js/RegExp) (-re-schema true)})
 
 (defn comparator-schemas []
   (->> {:> >, :>= >=, :< <, :<= <=, := =, :not= not=}
@@ -1972,6 +1987,11 @@
           :name name}))
 
 #?(:clj
+   (defmacro => [name value]
+     (let [name' `'~(symbol (str name))
+           ns'   `'~(symbol (str *ns*))]
+       `(-register-function-schema! ~ns' ~name' ~value)))
+   :cljr
    (defmacro => [name value]
      (let [name' `'~(symbol (str name))
            ns'   `'~(symbol (str *ns*))]

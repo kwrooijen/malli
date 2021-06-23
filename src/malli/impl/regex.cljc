@@ -436,9 +436,11 @@
 
 ;;;; # Shared Drivers
 
-(defn- make-stack [] #?(:clj (ArrayDeque.), :cljs #js []))
+(defn- make-stack [] #?(:clj (ArrayDeque.), :cljs #js []), :cljr [])
 
-(defn- empty-stack? [^ArrayDeque stack] #?(:clj (.isEmpty stack), :cljs (zero? (alength stack))))
+(defn- empty-stack? [stack] #?(:clj (.isEmpty stack)
+                               :cljs (zero? (alength stack))
+                               :cljr (zero? (alength stack))))
 
 (defprotocol ^:private ICache
   (ensure-cached! [cache f pos regs]))
@@ -449,6 +451,7 @@
 ;; Uses quadratic probing with power-of-two sizes and triangular numbers, what a nice trick!
 (deftype ^:private Cache
   #?(:clj  [^:unsynchronized-mutable ^"[Ljava.lang.Object;" values, ^:unsynchronized-mutable ^long size]
+     :cljr  [^:unsynchronized-mutable values ^:unsynchronized-mutable size]
      :cljs [^:mutable values, ^:mutable size])
   ICache
   (ensure-cached! [_ f pos regs]
@@ -471,6 +474,7 @@
           max-index (unchecked-dec capacity)
           ;; Unfortunately `hash-combine` hashes its second argument on clj and neither argument on cljs:
           h #?(:clj (-> (hash f) (hash-combine pos) (hash-combine regs))
+               :cljr (-> (hash f) (hash-combine pos) (hash-combine regs))
                :cljs (-> (hash f) (hash-combine (hash pos)) (hash-combine (hash regs))))]
       (loop [i (bit-and h max-index), collisions 0]
         (if-some [^CacheEntry entry (aget values i)]
@@ -489,7 +493,8 @@
 (defn- make-cache [] (Cache. (object-array 2) 0))
 
 (deftype ^:private CheckDriver
-  #?(:clj  [^:unsynchronized-mutable ^boolean success, ^ArrayDeque stack, cache]
+  #?(:clj  [^:unsynchronized-mutable ^boolean success, stack, cache]
+     :cljr  [^:unsynchronized-mutable ^boolean success, stack, cache]
      :cljs [^:mutable success, stack, cache])
 
   Driver
@@ -504,7 +509,9 @@
       (noncaching-park-validator! self validator regs pos coll k))))
 
 (deftype ^:private ParseDriver
-  #?(:clj  [^:unsynchronized-mutable ^boolean success, ^ArrayDeque stack, cache
+  #?(:clj  [^:unsynchronized-mutable ^boolean success, stack, cache
+            ^:unsynchronized-mutable result]
+     :cljr  [^:unsynchronized-mutable ^boolean success, stack, cache
             ^:unsynchronized-mutable result]
      :cljs [^:mutable success, stack, cache, ^:mutable result])
 
@@ -547,8 +554,10 @@
 ;;;; # Explainer
 
 (deftype ^:private ExplanationDriver
-  #?(:clj  [^:unsynchronized-mutable ^boolean success, ^ArrayDeque stack, cache
+  #?(:clj  [^:unsynchronized-mutable ^boolean success, stack, cache
             in, ^:unsynchronized-mutable errors-max-pos, ^:unsynchronized-mutable errors]
+     :cljr  [^:unsynchronized-mutable ^boolean success, stack, cache
+             in, ^:unsynchronized-mutable errors-max-pos, ^:unsynchronized-mutable errors]
      :cljs [^:mutable success, stack, cache, in, ^:mutable errors-max-pos, ^:mutable errors])
 
   Driver
